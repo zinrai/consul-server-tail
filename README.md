@@ -4,7 +4,7 @@ A read-only, near-real-time terminal view of a Consul server cluster, for watchi
 
 ## What it does
 
-Polls the HTTP API of each Consul server every few seconds and prints, in one screen, four cluster-level checks (leader agreement, peer composition, node-id uniqueness, index convergence) and a one-line summary per node. Any node that disagrees with the majority is expanded in place to its full raw `raft list-peers` and `members` output, so detail appears only where there is a problem. A node that cannot be reached is shown as a single UNREACHABLE line.
+Polls the HTTP API of each Consul server every few seconds and prints, in one screen, four cluster-level checks (leader agreement, peer composition, node-id uniqueness, index convergence) and a one-line summary per node, with the node name next to its address. Names come from each node's own answer (`Config.NodeName` in `/v1/agent/self`); a node that cannot answer shows `-`. Any node that disagrees with the majority is expanded in place to its full raw `raft list-peers` and `members` output, so detail appears only where there is a problem. A node that cannot be reached is shown as a single UNREACHABLE line. The dropped/rejoined transition log keeps node names, recorded at the moment of the event from the cycle in which the node last answered.
 
 It does not change cluster state. It issues only GET requests and runs no `consul` write commands.
 
@@ -41,11 +41,11 @@ consul-server-tail  17:32:30  interval=5s expect=5
 [OK ] node-id-unique   5 unique ids
 [OK ] index-converge   commit_gap=0 last_log_gap=0 (tol=100)
 --------------------------------------------------------------------------------------
-10.0.0.1         follower leader=10.0.0.3:8300         commit=323858050 last_log=323858050  ok
-10.0.0.2         follower leader=10.0.0.3:8300         commit=323858050 last_log=323858050  ok
-10.0.0.3         leader   leader=10.0.0.3:8300         commit=323858050 last_log=323858050  ok
-10.0.0.4         follower leader=10.0.0.3:8300         commit=323858050 last_log=323858050  ok
-10.0.0.5         follower leader=10.0.0.3:8300         commit=323858050 last_log=323858050  ok
+10.0.0.1         consul-server01  follower leader=10.0.0.3:8300          commit=323858050 last_log=323858050  ok
+10.0.0.2         consul-server02  follower leader=10.0.0.3:8300          commit=323858050 last_log=323858050  ok
+10.0.0.3         consul-server03  leader   leader=10.0.0.3:8300          commit=323858050 last_log=323858050  ok
+10.0.0.4         consul-server04  follower leader=10.0.0.3:8300          commit=323858050 last_log=323858050  ok
+10.0.0.5         consul-server05  follower leader=10.0.0.3:8300          commit=323858050 last_log=323858050  ok
 --------------------------------------------------------------------------------------
 recent transitions:
   (none yet)
@@ -57,7 +57,7 @@ When a node loses its view of the leader, its check lines turn to `BAD` and that
 [BAD] leader-agreement (none)<-10.0.0.1 | 10.0.0.3:8300<-10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5
 [BAD] peer-composition config unavailable on: 10.0.0.1:No cluster leader
 ...
-NODE 10.0.0.1  (believes leader: -)  <- differs from majority
+NODE 10.0.0.1 consul-server01  (believes leader: -)  <- differs from majority
   index: commit=323858050 last_log=323858050
   raft list-peers: ERROR No cluster leader
   members (servers):

@@ -71,6 +71,7 @@ def poll_one(addr, timeout):
         "reachable": False,
         "err": "",
         "leader_view": "",
+        "node_name": "",
         "commit_index": None,
         "last_log_index": None,
         "peers": None,
@@ -79,7 +80,7 @@ def poll_one(addr, timeout):
     }
     if not fetch_leader_view(st, timeout):
         return st
-    fetch_raft_indexes(st, timeout)
+    fetch_agent_self(st, timeout)
     fetch_raft_config(st, timeout)
     fetch_members(st, timeout)
     return st
@@ -100,18 +101,17 @@ def fetch_leader_view(st, timeout):
     return True
 
 
-def fetch_raft_indexes(st, timeout):
-    """Silent on failure: commit_index / last_log_index stay None and the
-    index-converge check reports the node as having no index data. The
-    failure reason is not worth a line on screen."""
+def fetch_agent_self(st, timeout):
+    """Silent on failure: indexes stay None, node_name stays empty, and the
+    affected displays show "no index data" and "-". The failure reason is
+    not worth a line on screen. The node name is the node's own report;
+    there is no other source, so an unreachable node displays "-"."""
     try:
-        raft = (
-            get_json(st["addr"], "/v1/agent/self", timeout)
-            .get("Stats", {})
-            .get("raft", {})
-        )
+        info = get_json(st["addr"], "/v1/agent/self", timeout)
     except (urllib.error.URLError, OSError, ValueError):
         return
+    st["node_name"] = info.get("Config", {}).get("NodeName", "")
+    raft = info.get("Stats", {}).get("raft", {})
     st["commit_index"] = parse_uint(raft.get("commit_index"))
     st["last_log_index"] = parse_uint(raft.get("last_log_index"))
 
@@ -370,7 +370,10 @@ def render(states, checks, transitions, interval, expect, tol):
     for s in states:
         name = short_addr(s["addr"])
         if not s["reachable"]:
-            out.append("%-16s UNREACHABLE  %s" % (name, s["err"]))
+            out.append(
+                "%-16s %-16s UNREACHABLE  %s"
+                % (name, or_dash(s["node_name"]), s["err"])
+            )
         elif name in peer_odd or name in member_odd:
             render_full(out, s)
         else:
@@ -409,8 +412,9 @@ def summary_line(s, name):
         flag = "  <- peers!"
     else:
         flag = "  ok"
-    return "%-16s %-8s leader=%-22s %s%s" % (
+    return "%-16s %-16s %-8s leader=%-22s %s%s" % (
         name,
+        or_dash(s["node_name"]),
         role,
         or_dash(s["leader_view"]),
         idx,
@@ -421,8 +425,8 @@ def summary_line(s, name):
 def render_full(out, s):
     name = short_addr(s["addr"])
     out.append(
-        "NODE %s  (believes leader: %s)  <- differs from majority"
-        % (name, or_dash(s["leader_view"]))
+        "NODE %s %s  (believes leader: %s)  <- differs from majority"
+        % (name, or_dash(s["node_name"]), or_dash(s["leader_view"]))
     )
     if has_indexes(s):
         out.append(
@@ -476,21 +480,30 @@ def majority_leader(states):
 
 
 def record_transitions(prev, cur, log, limit):
+    # A dropped node cannot report its name now, but it did one cycle ago:
+    # the name comes from prev. A rejoined node reports it again: cur.
+    # The leader line stays address-only, because naming a raft address
+    # would need a second name source.
     if prev is None:
         return
-    was_up = {}
+    prev_by_host = {}
     for s in prev:
-        was_up[short_addr(s["addr"])] = s["reachable"]
+        prev_by_host[short_addr(s["addr"])] = s
     now = time.strftime("%H:%M:%S")
     for s in cur:
         name = short_addr(s["addr"])
+        if name not in prev_by_host:
+            continue
         up = s["reachable"]
-        if name in was_up and up != was_up[name]:
-            if up:
-                word = "rejoined"
-            else:
-                word = "dropped"
-            log.append("%s %s %s" % (now, name, word))
+        if up == prev_by_host[name]["reachable"]:
+            continue
+        if up:
+            word = "rejoined"
+            node_name = s["node_name"]
+        else:
+            word = "dropped"
+            node_name = prev_by_host[name]["node_name"]
+        log.append("%s %s %s %s" % (now, name, or_dash(node_name), word))
     prev_leader = majority_leader(prev)
     cur_leader = majority_leader(cur)
     if cur_leader and prev_leader != cur_leader:
